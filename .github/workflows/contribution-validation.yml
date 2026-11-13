@@ -1,0 +1,63 @@
+name: Contribution validation
+
+on:
+  push:
+    branches: [validation/task-prompts-ci]
+
+permissions:
+  contents: read
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+  TZ: UTC
+
+jobs:
+  verify:
+    name: ${{ matrix.label }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: Unchanged upstream baseline
+            ref: 3bb177a6de62b7fd8cd0432c33756e6f3c9ece9d
+          - label: Proposed task prompt fix
+            ref: c1174937b860fc97cd25771b0f6362b31d820805
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ matrix.ref }}
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Fetch release tags
+        run: git fetch --tags
+      - name: Setup pnpm
+        uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86
+      - name: Setup Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: 24
+          cache: pnpm
+      - name: Verify candidate and runner identity
+        env:
+          EXPECTED_COMMIT: ${{ matrix.ref }}
+        run: |
+          test "$(git rev-parse HEAD)" = "$EXPECTED_COMMIT"
+          test "$(id -u)" != 0
+          node --version
+          pnpm --version
+      - name: Install locked dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Install Chromium and system dependencies
+        run: pnpm exec playwright install --with-deps chromium
+      - name: Full official preflight
+        env:
+          TEST_REPORTER: spec
+        run: pnpm preflight
+      - name: Verify distribution dry run
+        run: pnpm run publish-skills --dry-run
+      - name: Verify clean source tree
+        run: |
+          git add -A
+          git diff --cached --exit-code
